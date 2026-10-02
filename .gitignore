@@ -1,0 +1,6 @@
+.env
+__pycache__/
+*.pyc
+out/exports/
+out/outbox.jsonl
+out/reminders.jsonl

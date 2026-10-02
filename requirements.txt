@@ -1,0 +1,5 @@
+# Candor uses only the Python standard library (Python 3.9+). Nothing to install.
+#
+# Windows only, and only for the OFFICIAL harness scorer (score_actions.py uses zoneinfo):
+#   pip install tzdata
+# Candor's own code does not need it (it falls back to a built-in US Pacific rule set).

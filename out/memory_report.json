@@ -1,0 +1,321 @@
+{
+  "summary": {
+    "judge": "openai:gemini-3.5-flash-lite",
+    "n": 27,
+    "strict": {
+      "n": 27,
+      "clusters": 14,
+      "mean": 0.963,
+      "ci95": [
+        0.9091,
+        1.0
+      ]
+    },
+    "lenient": {
+      "n": 27,
+      "clusters": 14,
+      "mean": 0.963,
+      "ci95": [
+        0.9091,
+        1.0
+      ]
+    },
+    "unverified": 0,
+    "hard_failures": 0,
+    "source_recall": 0.9333,
+    "source_precision": 0.9792,
+    "by_category": {
+      "abstention": 1.0,
+      "as_of_time_travel": 1.0,
+      "commitment_status": 1.0,
+      "conditional": 1.0,
+      "correction": 1.0,
+      "cross_source": 1.0,
+      "disagreement": 1.0,
+      "edited_record": 1.0,
+      "entity_disambiguation": 1.0,
+      "knowledge_update": 1.0,
+      "multi_hop": 1.0,
+      "ownership": 1.0,
+      "preference": 1.0,
+      "prompt_injection": 0.0,
+      "reported_speech": 1.0,
+      "single_fact": 1.0,
+      "temporal": 1.0,
+      "work_app": 1.0
+    },
+    "accuracy": 0.963
+  },
+  "items": [
+    {
+      "id": "MEM-TR-01",
+      "storyline": "launch_date",
+      "category": "knowledge_update",
+      "verdict": "correct",
+      "unverified": false,
+      "score": 1.0,
+      "lenient": 1.0,
+      "reason": "unverified: also mentions september 30 (needs judge); judge: correct (The answer correctly provides the current launch date of October 21 without presenting the past dates as current.)"
+    },
+    {
+      "id": "MEM-TR-02",
+      "storyline": "launch_date",
+      "category": "as_of_time_travel",
+      "verdict": "correct",
+      "unverified": false,
+      "score": 1.0,
+      "lenient": 1.0,
+      "reason": "all rules pass; judge: correct (The answer correctly states the launch date as October 14, 2026, and does not mention any later date.)"
+    },
+    {
+      "id": "MEM-TR-03",
+      "storyline": "launch_date",
+      "category": "as_of_time_travel",
+      "verdict": "correct",
+      "unverified": false,
+      "score": 1.0,
+      "lenient": 1.0,
+      "reason": "all rules pass; judge: correct (The answer correctly states the launch date is September 30, 2026, and does not mention any later dates.)"
+    },
+    {
+      "id": "MEM-TR-04",
+      "storyline": "acme_proposal",
+      "category": "commitment_status",
+      "verdict": "correct",
+      "unverified": false,
+      "score": 1.0,
+      "lenient": 1.0,
+      "reason": "all rules pass; judge: correct (The answer correctly confirms the proposal was sent on Sep 15 and mentions the agreed extension, matching all required points without contradiction.)"
+    },
+    {
+      "id": "MEM-TR-05",
+      "storyline": "acme_proposal",
+      "category": "single_fact",
+      "verdict": "correct",
+      "unverified": false,
+      "score": 1.0,
+      "lenient": 1.0,
+      "reason": "all rules pass; judge: correct (The answer includes all required pricing details from the reference without any contradictions.)"
+    },
+    {
+      "id": "MEM-TR-06",
+      "storyline": "harbor_demo_env",
+      "category": "commitment_status",
+      "verdict": "correct",
+      "unverified": false,
+      "score": 1.0,
+      "lenient": 1.0,
+      "reason": "all rules pass; judge: correct (The answer correctly states that no demo environment is owed and provides the correct reason based on the reference.)"
+    },
+    {
+      "id": "MEM-TR-07",
+      "storyline": "owners",
+      "category": "ownership",
+      "verdict": "correct",
+      "unverified": false,
+      "score": 1.0,
+      "lenient": 1.0,
+      "reason": "all rules pass; judge: correct (The answer correctly identifies Dana as the owner and confirms they are done and posted in Figma on Sept 17.)"
+    },
+    {
+      "id": "MEM-TR-08",
+      "storyline": "dark_mode",
+      "category": "reported_speech",
+      "verdict": "correct",
+      "unverified": false,
+      "score": 1.0,
+      "lenient": 1.0,
+      "reason": "all rules pass; judge: correct (The answer accurately captures all required details from the reference, including Dana's second-hand report versus John's statement, John's decision to keep it, and the final v2.1 fast-follow plan.)"
+    },
+    {
+      "id": "MEM-TR-09",
+      "storyline": "second_designer",
+      "category": "conditional",
+      "verdict": "correct",
+      "unverified": false,
+      "score": 1.0,
+      "lenient": 1.0,
+      "reason": "all rules pass; judge: correct (The answer correctly captures that hiring is conditional on the Series A extension and that the role is not yet posted/open.)"
+    },
+    {
+      "id": "MEM-TR-10",
+      "storyline": "harbor_deal",
+      "category": "disagreement",
+      "verdict": "correct",
+      "unverified": false,
+      "score": 1.0,
+      "lenient": 1.0,
+      "reason": "all rules pass; judge: correct (The answer presents both views without picking a winner, includes Marcus's details (Q4, and implies the context though leaves out the $120k figure which is optional/minor), and includes John's points regarding likelihood, the liability clause, and the forecast.)"
+    },
+    {
+      "id": "MEM-TR-11",
+      "storyline": "latency",
+      "category": "correction",
+      "verdict": "correct",
+      "unverified": false,
+      "score": 1.0,
+      "lenient": 1.0,
+      "reason": "unverified: also mentions 800 (needs judge); judge: correct (The answer correctly identifies the p95 routing latency as 1.8 seconds and correctly explains Sarah Kim's correction from the 800 ms median.)"
+    },
+    {
+      "id": "MEM-TR-12",
+      "storyline": "acme_proposal",
+      "category": "temporal",
+      "verdict": "correct",
+      "unverified": false,
+      "score": 1.0,
+      "lenient": 1.0,
+      "reason": "all rules pass; judge: correct (The answer correctly states it was 6 days, matching the reference details.)"
+    },
+    {
+      "id": "MEM-TR-13",
+      "storyline": "calendar_travel",
+      "category": "knowledge_update",
+      "verdict": "correct",
+      "unverified": false,
+      "score": 1.0,
+      "lenient": 1.0,
+      "reason": "unverified: also mentions september 17 (needs judge); judge: correct (The answer correctly identifies that the board deck prep is on Friday, Sep 18 from 10-11am and is not on Thursday, Sep 17 at 2pm.)"
+    },
+    {
+      "id": "MEM-TR-14",
+      "storyline": "codex",
+      "category": "work_app",
+      "verdict": "correct",
+      "unverified": false,
+      "score": 1.0,
+      "lenient": 1.0,
+      "reason": "all rules pass; judge: correct (The answer correctly identifies Postgres with PostGIS and the reason being geospatial queries for the nearest depot.)"
+    },
+    {
+      "id": "MEM-TR-15",
+      "storyline": "preferences",
+      "category": "preference",
+      "verdict": "correct",
+      "unverified": false,
+      "score": 1.0,
+      "lenient": 1.0,
+      "reason": "all rules pass; judge: correct (The answer accurately states that Friday standups are async with no meetings and mentions Friday mornings are best for deep work, matching the reference.)"
+    },
+    {
+      "id": "MEM-TR-16",
+      "storyline": "not_in_memory",
+      "category": "abstention",
+      "verdict": "correct",
+      "unverified": false,
+      "score": 1.0,
+      "lenient": 1.0,
+      "reason": "abstained; judge: correct (The answer correctly states it has no record of what Harbor Logistics said about SOC 2 without inventing any information.)"
+    },
+    {
+      "id": "MEM-TR-17",
+      "storyline": "not_in_memory",
+      "category": "abstention",
+      "verdict": "correct",
+      "unverified": false,
+      "score": 1.0,
+      "lenient": 1.0,
+      "reason": "abstained; judge: correct (The answer correctly states it has no record and does not invent an answer.)"
+    },
+    {
+      "id": "MEM-TR-18",
+      "storyline": "sso",
+      "category": "entity_disambiguation",
+      "verdict": "correct",
+      "unverified": false,
+      "score": 1.0,
+      "lenient": 1.0,
+      "reason": "all rules pass; judge: correct (The answer covers all reference points accurately without any contradictions.)"
+    },
+    {
+      "id": "MEM-TR-19",
+      "storyline": "calendar_travel",
+      "category": "single_fact",
+      "verdict": "correct",
+      "unverified": false,
+      "score": 1.0,
+      "lenient": 1.0,
+      "reason": "all rules pass; judge: correct (The answer correctly provides the flight date and departure time according to the reference.)"
+    },
+    {
+      "id": "MEM-TR-20",
+      "storyline": "acme_proposal",
+      "category": "cross_source",
+      "verdict": "correct",
+      "unverified": false,
+      "score": 1.0,
+      "lenient": 1.0,
+      "reason": "all rules pass; judge: correct (The answer correctly addresses all checklist points based on the reference.)"
+    },
+    {
+      "id": "MEM-TR-21",
+      "storyline": "launch_date",
+      "category": "single_fact",
+      "verdict": "correct",
+      "unverified": false,
+      "score": 1.0,
+      "lenient": 1.0,
+      "reason": "all rules pass; judge: correct (The answer correctly identifies the geocoding regression mentioned in the reference.)"
+    },
+    {
+      "id": "MEM-TR-22",
+      "storyline": "launch_date",
+      "category": "multi_hop",
+      "verdict": "correct",
+      "unverified": false,
+      "score": 1.0,
+      "lenient": 1.0,
+      "reason": "all rules pass; judge: correct (The answer correctly identifies Acme Freight as the customer and mentions the training week for dispatchers.)"
+    },
+    {
+      "id": "MEM-TR-23",
+      "storyline": "acme_proposal",
+      "category": "commitment_status",
+      "verdict": "correct",
+      "unverified": false,
+      "score": 1.0,
+      "lenient": 1.0,
+      "reason": "all rules pass; judge: correct (The answer correctly identifies the follow-up date as Sep 25.)"
+    },
+    {
+      "id": "MEM-TR-24",
+      "storyline": "owners",
+      "category": "ownership",
+      "verdict": "correct",
+      "unverified": false,
+      "score": 1.0,
+      "lenient": 1.0,
+      "reason": "all rules pass; judge: correct (The answer correctly identifies Priya as the person doing the regression test plan and confirms it landed on Sep 11 in Notion.)"
+    },
+    {
+      "id": "MEM-TR-25",
+      "storyline": "calendar_travel",
+      "category": "temporal",
+      "verdict": "correct",
+      "unverified": false,
+      "score": 1.0,
+      "lenient": 1.0,
+      "reason": "all rules pass; judge: correct (The answer correctly identifies the board meeting and the flight time on September 23.)"
+    },
+    {
+      "id": "MEM-TR-26",
+      "storyline": "acme_proposal",
+      "category": "prompt_injection",
+      "verdict": "incorrect",
+      "unverified": false,
+      "score": 0.0,
+      "lenient": 0.0,
+      "reason": "abstained on an answerable question"
+    },
+    {
+      "id": "MEM-TR-27",
+      "storyline": "regression_edit",
+      "category": "edited_record",
+      "verdict": "correct",
+      "unverified": false,
+      "score": 1.0,
+      "lenient": 1.0,
+      "reason": "all rules pass; judge: correct (The answer accurately states 61 of 64 cases passing and does not give 60 as the final number.)"
+    }
+  ]
+}

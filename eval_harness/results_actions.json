@@ -1,0 +1,280 @@
+{
+  "summary": {
+    "n": 17,
+    "pass_rate": 1.0,
+    "arg_accuracy": 1.0
+  },
+  "items": [
+    {
+      "id": "ACT-X-01",
+      "command": "Tell Dana the mockups look great",
+      "pass": true,
+      "arg_accuracy": 1.0,
+      "predicted": [
+        {
+          "type": "slack.send_message",
+          "args": {
+            "to": "U04DANA",
+            "text": "The mockups look great."
+          }
+        }
+      ]
+    },
+    {
+      "id": "ACT-X-02",
+      "command": "Email Dave Morales that the stop reordering fix is in staging",
+      "pass": true,
+      "arg_accuracy": 1.0,
+      "predicted": [
+        {
+          "type": "gmail.send",
+          "args": {
+            "to": [
+              "dave.morales@pinecrestcarriers.example.com"
+            ],
+            "cc": [],
+            "subject": "Stop reordering fix is in staging",
+            "body": "Hi Dave,\n\nThe stop reordering fix is in staging.\n\nThanks,\nAlex"
+          }
+        }
+      ]
+    },
+    {
+      "id": "ACT-X-03",
+      "command": "Schedule a call with Marcus and Ben on Friday at 11 to go over Harbor",
+      "pass": true,
+      "arg_accuracy": 1.0,
+      "predicted": [
+        {
+          "type": "calendar.create_event",
+          "args": {
+            "title": "Harbor \u2014 Call with Marcus and Ben",
+            "start": "2026-09-18T11:00:00-07:00",
+            "end": "2026-09-18T11:30:00-07:00",
+            "attendees": [
+              "marcus@brightline.example.com",
+              "ben@brightline.example.com"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "ACT-X-04",
+      "command": "Remind me tomorrow to call Dr. Huang",
+      "pass": true,
+      "arg_accuracy": 1.0,
+      "predicted": [
+        {
+          "type": "reminder.create",
+          "args": {
+            "text": "Call Dr. Huang",
+            "due": "2026-09-18T09:00:00-07:00"
+          }
+        }
+      ]
+    },
+    {
+      "id": "ACT-X-05",
+      "command": "Cancel my 1:1 with Ben",
+      "pass": true,
+      "arg_accuracy": 1.0,
+      "predicted": [
+        {
+          "type": "confirm",
+          "args": {
+            "summary": "Cancel your 1:1 with Ben Carter?"
+          }
+        }
+      ]
+    },
+    {
+      "id": "ACT-X-06",
+      "command": "Who owns the onboarding mockups?",
+      "pass": true,
+      "arg_accuracy": 1.0,
+      "predicted": [
+        {
+          "type": "memory.ask",
+          "args": {
+            "question": "Who owns the onboarding mockups?"
+          }
+        }
+      ]
+    },
+    {
+      "id": "ACT-X-07",
+      "command": "Let Dana know I'll review the mockups tomorrow",
+      "pass": true,
+      "arg_accuracy": 1.0,
+      "predicted": [
+        {
+          "type": "slack.send_message",
+          "args": {
+            "to": "U04DANA",
+            "text": "I'll review the mockups tomorrow."
+          }
+        }
+      ]
+    },
+    {
+      "id": "ACT-X-08",
+      "command": "Remind me at 5pm to send the deck",
+      "pass": true,
+      "arg_accuracy": 1.0,
+      "predicted": [
+        {
+          "type": "reminder.create",
+          "args": {
+            "text": "Send the deck",
+            "due": "2026-09-17T17:00:00-07:00"
+          }
+        }
+      ]
+    },
+    {
+      "id": "ACT-X-09",
+      "command": "Post in #general that the offsite agenda is out",
+      "pass": true,
+      "arg_accuracy": 1.0,
+      "predicted": [
+        {
+          "type": "slack.send_message",
+          "args": {
+            "to": "C13GEN",
+            "text": "The offsite agenda is out."
+          }
+        }
+      ]
+    },
+    {
+      "id": "ACT-X-10",
+      "command": "Reschedule the Pinecrest check-in to Wednesday at 3pm",
+      "pass": true,
+      "arg_accuracy": 1.0,
+      "predicted": [
+        {
+          "type": "calendar.update_event",
+          "args": {
+            "event_id": "CAL-F-21",
+            "start": "2026-09-23T15:00:00-07:00",
+            "end": "2026-09-23T15:30:00-07:00"
+          }
+        }
+      ]
+    },
+    {
+      "id": "ACT-X-11",
+      "command": "Message Sarah",
+      "pass": true,
+      "arg_accuracy": 1.0,
+      "predicted": [
+        {
+          "type": "clarify",
+          "args": {
+            "question": "Which Sarah do you mean: Sarah Kim or Sarah Patel (Acme, external)?"
+          }
+        }
+      ]
+    },
+    {
+      "id": "ACT-X-12",
+      "command": "Push the standup back 30 minutes",
+      "pass": true,
+      "arg_accuracy": 1.0,
+      "predicted": [
+        {
+          "type": "calendar.update_event",
+          "args": {
+            "event_id": "CAL-STANDUP",
+            "start": "2026-09-17T10:00:00-07:00",
+            "end": "2026-09-17T10:15:00-07:00"
+          }
+        }
+      ]
+    },
+    {
+      "id": "ACT-X-13",
+      "command": "Email Tom the board pre-read and cc John",
+      "pass": true,
+      "arg_accuracy": 1.0,
+      "predicted": [
+        {
+          "type": "gmail.send",
+          "args": {
+            "to": [
+              "tom@foundryridge.example.com"
+            ],
+            "cc": [
+              "john@brightline.example.com"
+            ],
+            "subject": "Sharing the board pre-read with you",
+            "body": "Hi Tom,\n\nSharing the board pre-read with you.\n\nThanks,\nAlex"
+          }
+        }
+      ]
+    },
+    {
+      "id": "ACT-X-14",
+      "command": "Open Notion",
+      "pass": true,
+      "arg_accuracy": 1.0,
+      "predicted": [
+        {
+          "type": "app.open",
+          "args": {
+            "app": "Notion"
+          }
+        }
+      ]
+    },
+    {
+      "id": "ACT-X-15",
+      "command": "Delete the Harbor demo event",
+      "pass": true,
+      "arg_accuracy": 1.0,
+      "predicted": [
+        {
+          "type": "confirm",
+          "args": {
+            "summary": "Delete the Harbor demo event? This can't be undone."
+          }
+        }
+      ]
+    },
+    {
+      "id": "ACT-X-16",
+      "command": "Book an hour with Priya on Monday at 3pm about the regression run",
+      "pass": true,
+      "arg_accuracy": 1.0,
+      "predicted": [
+        {
+          "type": "calendar.create_event",
+          "args": {
+            "title": "Regression run \u2014 Meeting with Priya",
+            "start": "2026-09-21T15:00:00-07:00",
+            "end": "2026-09-21T16:00:00-07:00",
+            "attendees": [
+              "priya@brightline.example.com"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "ACT-X-17",
+      "command": "Thank Priya for the regression plan",
+      "pass": true,
+      "arg_accuracy": 1.0,
+      "predicted": [
+        {
+          "type": "slack.send_message",
+          "args": {
+            "to": "U07PRIYA",
+            "text": "Thank you for the regression plan!"
+          }
+        }
+      ]
+    }
+  ]
+}
