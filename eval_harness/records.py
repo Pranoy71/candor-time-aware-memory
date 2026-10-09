@@ -46,7 +46,7 @@ def load(data_dir):
 
     names = {u["id"]: u["real_name"] for u in json.load(open(d / "connectors/slack/users.json"))}
     chans = {c["id"]: c["name"] for c in json.load(open(d / "connectors/slack/channels.json"))}
-    for line in open(d / "connectors/slack/messages.jsonl"):
+    for line in open(d / "connectors/slack/messages.jsonl" , encoding="utf-8"):
         x = json.loads(line)
         t = _dt(x["ts"])
         where = chans.get(x["channel_id"], x["channel_id"])
