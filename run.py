@@ -4,7 +4,10 @@
   python run.py memory  --questions Q.jsonl  --out A.jsonl        answer memory questions
   python run.py actions --commands  C.jsonl  --out P.jsonl        plan actions (dry run)
   python run.py eval                                              run every scorer on the train sets + leak audit
+  python run.py enrich [--limit N]                                one-time model pass that annotates every record (resumable)
+  python run.py report                                            write the latest scores into docs/RESULTS.md and the README
   python run.py audit                                             time-travel / deletion / secret leak audit
+  python run.py diagnose [--gold G] [--answers A]                 failure taxonomy: search miss vs answer miss
   python run.py ask "question" [--as-of ISO]                      ask one question
   python run.py act "command" [--as-of ISO]                       plan one command
   python run.py commitments [--as-of ISO]                         ledger of promises and their status
@@ -54,7 +57,28 @@ def make_llm(args):
     return llm if llm.available else None
 
 
+def _ablations(args):
+    if getattr(args, "no_enrich", False):
+        os.environ["CANDOR_ENRICH"] = "0"
+    if getattr(args, "no_plan", False):
+        os.environ["CANDOR_PLAN"] = "0"
+    if getattr(args, "plan", False):
+        os.environ["CANDOR_PLAN"] = "1"
+
+
+def cmd_enrich(args):
+    from candor.enrich import build
+    from candor.llm import LLM
+    from candor.store import Store
+    llm = LLM()
+    if not llm.available:
+        sys.exit("enrich needs a model key (GEMINI_API_KEY in .env)")
+    r = build(Store(), llm, limit=args.limit)
+    print(r, llm.stats())
+
+
 def cmd_memory(args):
+    _ablations(args)
     from candor.memory import Memory
     llm = make_llm(args)
     mem = Memory(llm=llm, use_llm=False if llm is None else True, llm_rerank=not args.no_rerank)
@@ -93,15 +117,27 @@ def cmd_actions(args):
 
 
 def cmd_eval(args):
+    _ablations(args)
     from candor.evalrun import run_scorer, leak_audit
     out = ROOT / "out"
     out.mkdir(exist_ok=True)
     ns = argparse.Namespace(questions=str(ROOT / "evals/memory_train.jsonl"), out=str(out / "memory_answers.jsonl"),
-                            no_llm=args.no_llm, no_rerank=args.no_rerank)
+                            no_llm=args.no_llm, no_rerank=args.no_rerank, no_enrich=False, no_plan=False, plan=False)
     cmd_memory(ns)
     print("\n=== RETRIEVAL ===")
     print(run_scorer("score_retrieval.py", "--gold", "../evals/memory_train.jsonl", "--answers", str(out / "memory_answers.jsonl"),
                      "--out", str(out / "retrieval_report.json")))
+    if args.dev:     # the questions I did NOT tune on: retrieval score plus the failure taxonomy
+        dev_out = out / "memory_dev_answers.jsonl"
+        cmd_memory(argparse.Namespace(questions=str(ROOT / "evals/memory_dev.jsonl"), out=str(dev_out), no_llm=args.no_llm,
+                                      no_rerank=args.no_rerank, no_enrich=False, no_plan=False, plan=False))
+        print("\n=== DEV SET: RETRIEVAL ===")
+        print(run_scorer("score_retrieval.py", "--gold", "../evals/memory_dev.jsonl", "--answers", str(dev_out), "--out", str(out / "retrieval_dev_report.json")))
+        from candor.diagnose import diagnose, render
+        from candor.memory import Memory
+        gold = read_jsonl(ROOT / "evals/memory_dev.jsonl")
+        print("=== DEV SET: FAILURE TAXONOMY ===")
+        print(render(diagnose(Memory(use_llm=False), gold, {r["id"]: r for r in read_jsonl(dev_out)})))
     judge = args.judge
     jargs = ["--judge", judge]
     if judge == "gemini":      # the official judge speaks OpenAI-compatible; Gemini's free tier exposes that endpoint
@@ -126,6 +162,9 @@ def cmd_eval(args):
                      "--out", str(out / "actions_report.json")))
     if not args.skip_audit:
         cmd_audit(argparse.Namespace(times=10))
+    from candor.evalrun import write_report       # the README results block always matches the last eval
+    write_report()
+    print("[candor] README results block and docs/RESULTS.md updated from this run")
 
 
 def cmd_audit(args):
@@ -138,6 +177,20 @@ def cmd_audit(args):
             print("  ", v)
         sys.exit(1)
     print("0 violations: nothing from the future, nothing deleted, no secrets, no deletion markers.")
+
+
+def cmd_report(args):
+    from candor.evalrun import write_report
+    print(write_report())
+
+
+def cmd_diagnose(args):
+    from candor.memory import Memory
+    from candor.diagnose import diagnose, render
+    gold = read_jsonl(args.gold)
+    answers = {r["id"]: r for r in read_jsonl(args.answers)} if args.answers else None
+    mem = Memory(use_llm=False)
+    print(render(diagnose(mem, gold, answers)))
 
 
 def cmd_ask(args):
@@ -193,6 +246,11 @@ def main():
     p.add_argument("--questions", required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--no-rerank", action="store_true", help="keep deterministic retrieval order (ignore LLM evidence picks)")
+    p.add_argument("--no-enrich", action="store_true", help="ablation: ignore enrich/annotations.jsonl")
+    p.add_argument("--no-plan", action="store_true", help="skip the model's query plan (the default)")
+    p.add_argument("--plan", action="store_true", help="experimental: let the model plan the search (off by default, see README)")
+    p = add("enrich", cmd_enrich, "one-time model pass that annotates every record (resumable, about 130 calls)")
+    p.add_argument("--limit", type=int, default=None, help="stop after N batches (use to spread over several days of quota)")
     p = add("actions", cmd_actions, "plan actions for a JSONL of commands (dry run)")
     p.add_argument("--commands", required=True)
     p.add_argument("--out", required=True)
@@ -200,9 +258,17 @@ def main():
     p.add_argument("--judge", default="none", help="none | gemini | anthropic | openai | claude-cli (see eval_harness/judge.py)")
     p.add_argument("--judge-model", default=None)
     p.add_argument("--no-rerank", action="store_true")
+    p.add_argument("--no-enrich", action="store_true")
+    p.add_argument("--no-plan", action="store_true")
+    p.add_argument("--plan", action="store_true")
     p.add_argument("--skip-audit", action="store_true")
+    p.add_argument("--dev", action="store_true", help="also run the 28-question dev set I did not tune on (about 60 more model calls)")
     p = add("audit", cmd_audit, "leak audit")
     p.add_argument("--times", type=int, default=25)
+    p = add("report", cmd_report, "write the latest scorer results into docs/RESULTS.md and the README results block")
+    p = add("diagnose", cmd_diagnose, "failure taxonomy: search miss vs answer miss")
+    p.add_argument("--gold", default=str(ROOT / "evals/memory_dev.jsonl"))
+    p.add_argument("--answers", default=None, help="a memory answers JSONL, to diagnose the LLM path too")
     for name, fn, h in (("ask", cmd_ask, "ask one question"), ("act", cmd_act, "plan one command"),
                         ("commitments", cmd_commitments, "commitments ledger"), ("timeline", cmd_timeline, "topic timeline"),
                         ("assistant", cmd_assistant, "interactive assistant")):
