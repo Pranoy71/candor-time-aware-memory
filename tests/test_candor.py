@@ -116,7 +116,7 @@ class TestLLMPath(unittest.TestCase):
         def fake(system, user):
             return json.dumps({"answer": "Launch is Oct 21. key sk-brightline-abcdef123456",
                                "sources": ["EM-F-036", "NOPE-1", "SL-RP-0910-1"], "relevant": ["NOPE-1", "EM-F-036"], "abstain": False})
-        m = Memory(llm=MockLLM(fake))
+        m = Memory(llm=MockLLM(fake), use_plan=True)
         r = m.ask("When is Route Planner v2 launching?", "2026-09-12T12:00:00-07:00")    # EM-F-036 is Sep 16 -> future
         self.assertNotIn("EM-F-036", r["sources"] + r["retrieved"])
         self.assertNotIn("NOPE-1", r["sources"] + r["retrieved"])
@@ -190,13 +190,216 @@ class TestTimeAndActions(unittest.TestCase):
         a = p.plan("blorp the frobnicator", "2026-09-18T09:00:00-07:00")
         self.assertEqual(a[0]["type"], "clarify")          # unknown command never guesses
 
-    def test_llm_actions_validated(self):
-        bad = {"actions": [{"type": "slack.send_message", "args": {"to": "U-FAKE", "text": "hi"}},
-                           {"type": "calendar.update_event", "args": {"event_id": "CAL-NOPE", "start": "x"}},
-                           {"type": "app.open", "args": {"app": "Figma"}}]}
+    def test_llm_actions_grounded(self):
+        """The model proposes by name; code resolves. A person who does not exist is never acted on."""
+        fake = {"actions": [{"type": "slack.send_message", "to": ["Nobody Real"], "text": "hi"}]}
+        p = Planner(mem().store, memory=mem(), llm=MockLLM(lambda s, u: json.dumps(fake)))
+        a = p.plan("ping nobody real about stuff", "2026-09-18T09:00:00-07:00")
+        self.assertEqual([x["type"] for x in a], ["clarify"])
+        ok = {"actions": [{"type": "app.open", "app": "Figma", "open_kind": "app"}]}
+        p = Planner(mem().store, memory=mem(), llm=MockLLM(lambda s, u: json.dumps(ok)))
+        self.assertEqual(p.plan("gimme figma", "2026-09-18T09:00:00-07:00")[0]["args"]["app"], "Figma")
+
+    def test_model_dates_are_cross_checked(self):
+        """The model says 3pm tomorrow; the command says 'tomorrow at 2'. Code trusts the explicit phrase."""
+        bad = {"actions": [{"type": "calendar.create_event", "title": "Sync with Ben", "start": "2026-09-17T15:00:00-07:00",
+                            "end": "2026-09-17T15:30:00-07:00", "attendees": ["Ben Carter"]}]}
         p = Planner(mem().store, memory=mem(), llm=MockLLM(lambda s, u: json.dumps(bad)))
-        a = p.plan("gimme figma", "2026-09-18T09:00:00-07:00")
-        self.assertEqual([x["type"] for x in a], ["app.open"])       # hallucinated ids dropped
+        a = p.plan("Book 30 minutes with Ben tomorrow at 2 about the NRR fix", "2026-09-16T12:00:00-07:00")
+        self.assertEqual(a[0]["args"]["start"], "2026-09-17T14:00:00-07:00")
+        self.assertIn("ben@brightline.example.com", a[0]["args"]["attendees"])
+
+    def test_ambiguous_name_and_destructive_never_reach_the_model(self):
+        calls = []
+        p = Planner(mem().store, memory=mem(), llm=MockLLM(lambda s, u: (calls.append(1), "{}")[1]))
+        self.assertEqual(p.plan("Delete all my emails from Marcus", "2026-09-18T09:00:00-07:00")[0]["type"], "confirm")
+        self.assertEqual(p.plan("What's our launch date again?", "2026-09-18T09:00:00-07:00")[0]["type"], "memory.ask")
+        self.assertEqual(calls, [])
+        amb = {"actions": [{"type": "slack.send_message", "to": ["Sarah"], "text": "hi"}]}
+        p = Planner(mem().store, memory=mem(), llm=MockLLM(lambda s, u: json.dumps(amb)))
+        self.assertEqual(p.plan("Message Sarah about the pricing proposal", "2026-09-18T09:00:00-07:00")[0]["type"], "clarify")
+
+    def test_person_known_only_from_memory(self):
+        d = Planner(mem().store, memory=mem()).dir
+        who = {p["name"]: p for p in d.people}
+        self.assertIn("Jordan Ellis", who)
+        self.assertTrue(who["Jordan Ellis"]["email"])
+        self.assertNotIn("All", who)
+
+
+class TestEnrichment(unittest.TestCase):
+    """Index-time enrichment must never let the future into the past."""
+
+    @staticmethod
+    def marker(uid):
+        import hashlib
+        return "zq" + hashlib.md5(uid.encode()).hexdigest()[:10]
+
+    @classmethod
+    def setUpClass(cls):
+        from candor import enrich
+        cls.enrich = enrich
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.path = Path(cls.tmp.name) / "ann.jsonl"
+        cls.prompts = []
+
+        def fake(system, user):
+            cls.prompts.append(user)
+            ids = re.findall(r"^\[([^\]]+)\]", user, re.M)
+            return json.dumps({"items": [{"id": i, "ctx": f"context zebrafoxtrot {i}", "kw": ["zebrafoxtrot", cls.marker(i)], "dates": ["2026-09-23"]}
+                                         for i in ids]})
+        cls.llm = MockLLM(fake)
+        cls.report = enrich.build(mem().store, cls.llm, limit=40, path=cls.path, progress=lambda *_: None)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_annotation_visible_only_after_its_whole_batch_exists(self):
+        st = mem().store
+        rows = [json.loads(l) for l in open(self.path, encoding="utf-8")]
+        self.assertTrue(rows)
+        for r in rows:
+            self.assertGreaterEqual(parse_dt(r["avail"]), st.by_id[r["id"]].time)
+
+    def test_model_never_sees_a_record_newer_than_the_annotation_time(self):
+        st = mem().store
+        avail = {json.loads(l)["id"]: parse_dt(json.loads(l)["avail"]) for l in open(self.path, encoding="utf-8")}
+        for prompt in self.prompts:
+            ids = re.findall(r"^\[([^\]]+)\]", prompt, re.M)
+            stamp = max(avail[i] for i in ids if i in avail)
+            self.assertTrue(all(st.by_id[i].time <= stamp for i in ids))
+
+    def test_unknown_ids_dropped_and_secrets_redacted(self):
+        batch = self.enrich.make_batches(mem().store)[0]
+        out = self.enrich.parse_items({"items": [{"id": "NOT-SHOWN", "ctx": "x", "kw": [], "dates": []},
+                                                 {"id": batch[0].id, "ctx": "key sk-brightline-abcdef123456", "kw": ["a"], "dates": ["bad", "2026-09-10"]}]}, batch)
+        self.assertEqual(list(out), [batch[0].id])
+        self.assertNotIn("sk-brightline", out[batch[0].id]["ctx"])
+        self.assertEqual(out[batch[0].id]["dates"], ["2026-09-10"])
+
+    def test_retrieval_uses_annotation_only_after_it_is_released(self):
+        from datetime import timedelta
+        os.environ["CANDOR_ANN"] = str(self.path)
+        try:
+            m = Memory(use_llm=False, enrich=True)
+            rows = [json.loads(l) for l in open(self.path, encoding="utf-8")]
+            late = max(rows, key=lambda r: r["avail"])
+            u = m.store.by_id[late["id"]]
+            after = parse_dt(late["avail"]) + timedelta(seconds=1)
+            before = parse_dt(late["avail"]) - timedelta(seconds=1)
+            hits_after, _ = m.retriever.search(self.marker(late["id"]), after, k=20)
+            hits_before, _ = m.retriever.search(self.marker(late["id"]), before, k=20)
+            self.assertTrue(any(h.unit.id == late["id"] for h in hits_after))
+            self.assertFalse(any(h.unit.id == late["id"] for h in hits_before), "annotation used before its release time")
+            ids_before = {h.unit.id for h in hits_before}
+            self.assertTrue(all(m.store.by_id[i].time <= before for i in ids_before))
+        finally:
+            os.environ.pop("CANDOR_ANN", None)
+
+    def test_enrichment_off_by_switch(self):
+        os.environ["CANDOR_ANN"] = str(self.path)
+        try:
+            m = Memory(use_llm=False, enrich=False)
+            hits, _ = m.retriever.search("zebrafoxtrot", parse_dt("2026-09-18T18:00:00-07:00"), k=5)
+            self.assertEqual(hits, [])
+        finally:
+            os.environ.pop("CANDOR_ANN", None)
+
+
+class TestPlanFlow(unittest.TestCase):
+    """The model-shaped path with a scripted model: planning, fusion, second pass, validation."""
+
+    def _answer(self, abstain, missing=None, sources=("EM-F-036",)):
+        return json.dumps({"facts": [], "answer": "I don't have that in memory." if abstain else "Oct 21.", "sources": [] if abstain else list(sources),
+                           "relevant": [] if abstain else list(sources), "abstain": abstain, "missing_queries": missing or []})
+
+    def test_plan_then_answer_then_second_pass(self):
+        calls = []
+
+        def fake(system, user):
+            calls.append(system[:20])
+            if "plan the search" in system:
+                return json.dumps({"type": "fact", "needs": [{"label": "launch", "queries": ["launch date moved", "go live date"]}],
+                                   "anchors": [], "entities": []})
+            n = sum(1 for c in calls if c.startswith("You are the memory"))
+            return self._answer(abstain=(n == 1), missing=["launch date october"])
+        m = Memory(llm=MockLLM(fake), use_plan=True)
+        r = m.ask("When is Route Planner v2 launching?", "2026-09-18T18:00:00-07:00")
+        self.assertEqual(len(calls), 3)               # plan, answer (abstains), second pass
+        self.assertFalse(r["abstained"])
+        self.assertTrue(r["_meta"]["plan"] and r["_meta"]["second_pass"])
+
+    def test_true_abstention_survives_second_pass(self):
+        def fake(system, user):
+            if "plan the search" in system:
+                return json.dumps({"needs": [{"label": "x", "queries": ["salary dana"]}], "anchors": []})
+            return self._answer(abstain=True, missing=["dana salary"])
+        r = Memory(llm=MockLLM(fake), use_plan=True).ask("What is Dana's salary?", "2026-09-18T18:00:00-07:00")
+        self.assertTrue(r["abstained"])
+        self.assertEqual(r["sources"], [])
+
+    def test_bad_plan_cannot_lose_what_plain_search_found(self):
+        plain = Memory(use_llm=False).ask("When is Route Planner v2 launching?", "2026-09-18T18:00:00-07:00")["retrieved"][:3]
+
+        def fake(system, user):
+            if "plan the search" in system:
+                return json.dumps({"needs": [{"label": "junk", "queries": ["banana smoothie recipe"]}], "anchors": []})
+            return self._answer(abstain=False)
+        got = Memory(llm=MockLLM(fake), use_plan=True).ask("When is Route Planner v2 launching?", "2026-09-18T18:00:00-07:00")["retrieved"]
+        self.assertTrue(set(plain) <= set(got[:10]))
+
+    def test_adversarial_plan_cannot_evict_plain_top3(self):
+        for q, when in (("What's on my calendar the day I fly to Denver?", "2026-09-18T18:00:00-07:00"),
+                        ("How many regression cases were passing on Sep 16?", "2026-09-16T14:00:00-07:00")):
+            m = Memory(use_llm=False, enrich=False)
+            as_of = parse_dt(when)
+            plain = [h.unit.id for h in m.retriever.search(q, as_of, k=20)[0][:3]]
+            wide = {"needs": [{"label": str(n), "queries": [f"calendar events meetings agenda {n}", f"schedule day {n} plan", f"lunch dinner {n}"]} for n in range(4)],
+                    "anchors": [{"query": "flight to Denver", "span": True}, {"query": "regression run", "span": True}]}
+            got = [h.unit.id for h in m.retriever.search_plan(q, as_of, wide, k=20)[0][:10]]
+            self.assertTrue(set(plain) <= set(got), (q, plain, got))
+
+    def test_garbage_plan_is_ignored(self):
+        from candor import qplan
+        self.assertIsNone(qplan.clean({"needs": "nope"}))
+        self.assertIsNone(qplan.clean(["a"]))
+        self.assertEqual(len(qplan.clean({"needs": [{"queries": ["a", "b", "c", "d"]}] * 9})["needs"]), 4)
+
+
+class TestLedgerModelAndDiagnose(unittest.TestCase):
+    def test_model_commitments_must_cite_shown_records(self):
+        from candor.ledger import commitments
+
+        def fake(system, user):
+            ids = re.findall(r"^\[([^\]]+)\]", user, re.M)
+            return json.dumps({"items": [{"owner": "Alex Rivera", "to": "Ben Carter", "what": "try to review the churn fix", "due": "2026-09-20",
+                                          "firm": "tentative", "ids": [ids[0], "FAKE-1"]},
+                                         {"owner": "Ghost", "what": "do a thing", "ids": ["FAKE-2"]}]})
+        items = commitments(mem(), "2026-09-18T18:00:00-07:00", MockLLM(fake))
+        self.assertFalse(any(i["owner"] == "Ghost" for i in items))
+        self.assertTrue(any(i["firm"] == "tentative" for i in items))
+        self.assertTrue(all("FAKE-1" not in i["evidence"] for i in items))
+
+    def test_diagnose_separates_search_from_answer(self):
+        from candor.diagnose import diagnose
+        gold = [{"id": "G1", "question": "When is Route Planner v2 launching?", "as_of": "2026-09-18T18:00:00-07:00", "answerable": True,
+                 "needed": [["SL-F-0159", "DCT-F-031"]], "key_terms": [["oct"]], "category": "x"},
+                {"id": "G2", "question": "q", "as_of": "2026-09-18T18:00:00-07:00", "answerable": True, "needed": [["NOT-A-RECORD"]], "category": "x"},
+                {"id": "G3", "question": "What is Dana's salary?", "as_of": "2026-09-18T18:00:00-07:00", "answerable": False, "needed": [], "category": "x"}]
+        ans = {"G1": {"retrieved": ["SL-F-0159"], "answer": "Nobody knows", "abstained": False},
+               "G2": {"retrieved": ["EM-F-001"], "answer": "x", "abstained": False},
+               "G3": {"retrieved": [], "answer": "I made it up", "abstained": False}}
+        got = {r["id"]: r["class"] for r in diagnose(mem(), gold, ans)}
+        self.assertEqual(got, {"G1": "ANSWER_MISS", "G2": "SEARCH_MISS", "G3": "SHOULD_ABSTAIN"})
+
+    def test_results_block_is_generated_from_scorer_files(self):
+        from candor.evalrun import build_report
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "actions_report.json").write_text(json.dumps({"summary": {"n": 5, "pass_rate": 0.8, "arg_accuracy": 0.9}}), encoding="utf-8")
+            block = build_report(d)
+            self.assertIn("pass rate 80.0%", block)
+            self.assertNotIn("Retrieval", block)
 
 
 class TestCLI(unittest.TestCase):
