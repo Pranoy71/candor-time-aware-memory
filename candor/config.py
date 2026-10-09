@@ -22,3 +22,7 @@ def load_env(path=None):
 
 
 load_env()
+
+# Default for the model-written query plan (qplan.py). OFF: in an offline replay of the real cached plans it lowered retrieval on
+# train (100% -> 88%) and did not help on the dev set (see README). Override per run with CANDOR_PLAN=1.
+PLAN_DEFAULT = False

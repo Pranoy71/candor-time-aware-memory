@@ -9,19 +9,26 @@ Pipeline
                query-term coverage (a unit matching most distinct terms beats one repeating a single term).
   5. expand    pseudo-relevance feedback: rare terms from the best hits find the rest of the story.
   6. diversify greedy selection with a per-record decay, so one long meeting cannot fill the top 10.
-Every step is deterministic; an optional LLM query-expansion and embedding fusion can be layered on top (llm_assist.py).
+Steps 1-6 are deterministic. Model-shaped retrieval is layered on top of them, never instead of them:
+  * enrichment (enrich.py): per-record context/keywords/dates added to the word index, visible only after their causal time;
+  * query planning (qplan.py + Retriever.search_plan): the model rewrites the question into evidence needs and anchors, each
+    searched by the steps above and fused by reciprocal rank with seats reserved per need.
 """
 import math
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 
 from . import textproc as tp
 from . import thesaurus
 from .store import Store
+from .enrich import Annotations
 
 K1, B = 1.2, 0.6
+IDF_POW = 1.0
 META_W = 0.6
+ENR_W = 0.3        # weight of enrichment words relative to body words (0.7 cost train questions; 0.3 kept the dev gain)
 
 
 @dataclass
@@ -34,7 +41,7 @@ class Hit:
 
 
 class Index:
-    def __init__(self, store: Store):
+    def __init__(self, store: Store, enrich=True):
         self.store = store
         self.n = len(store.units)
         self.pos = {u.id: i for i, u in enumerate(store.units)}
@@ -51,7 +58,26 @@ class Index:
                 self.post[t].append(i)
             if u.source == "codex":
                 self.chunks[u.id] = [Counter(tp.tokens(c)) for c in u.meta["chunks"]]
-        # edit events: the edited message is searchable through the edit text as well
+        # enrichment: extra words per unit, usable only once its causal time has passed (see enrich.py)
+        self.ann = Annotations() if enrich else Annotations("/nonexistent")
+        self.enr_tf = [Counter() for _ in store.units]
+        self.enr_dates = [() for _ in store.units]
+        for i, u in enumerate(store.units):
+            a = self.ann.by_id.get(u.id)
+            if a:
+                self.enr_tf[i] = Counter(tp.tokens(a["ctx"] + " " + " ".join(a["kw"])))
+                self.enr_dates[i] = tuple(datetime.fromisoformat(d).date() for d in a["dates"])
+                for t in self.enr_tf[i]:
+                    self.post[t].append(i)
+        for i, u in enumerate(store.units):          # an edit event is the same message with newer text: as findable as its target
+            if u.kind == "edit" and u.target in self.pos and not self.enr_tf[i]:
+                a = self.ann.by_id.get(u.target)
+                if a:
+                    j = self.pos[u.target]
+                    self.enr_tf[i], self.enr_dates[i] = self.enr_tf[j], self.enr_dates[j]
+                    self.ann.by_id[u.id] = {**a, "id": u.id, "avail_dt": max(a["avail_dt"], u.time)}
+                    for t in self.enr_tf[i]:
+                        self.post[t].append(i)
         self.people = self._people_index()
 
     # ---------------------------------------------------------------- metadata text
@@ -115,6 +141,16 @@ class Index:
             vis.add(i)
         return vis
 
+    def enr_ok(self, i, as_of):
+        """Is unit i's annotation usable at as_of? (released by its batch time, and the message has not been edited since)"""
+        a = self.ann.by_id.get(self.store.units[i].id)
+        if not a or a["avail_dt"] > as_of:
+            return False
+        u = self.store.units[i]
+        if u.kind == "edit":
+            return True                      # inherited from the target, released no earlier than the edit itself
+        return not any(t <= as_of for (t, _, _) in self.store.edits.get(u.id, []))
+
     def bm25(self, qterms, vis, as_of, weights=None, meta_bonus=0.25):
         """BM25 over the BODY only (proper length normalisation) plus a small bonus when a query term also
         appears in the metadata (speaker, title, channel, recipients). Returns ({doc: score}, {doc: terms})."""
@@ -127,11 +163,13 @@ class Index:
             df = len(docs)
             if not df:
                 continue
-            idf = math.log(1 + (N - df + 0.5) / (df + 0.5))
+            idf = math.log(1 + (N - df + 0.5) / (df + 0.5)) ** IDF_POW
             w = (weights or {}).get(t, 1.0)
             for i in docs:
                 u = self.store.units[i]
                 tf = self.body_tf[i].get(t, 0)
+                if ENR_W and self.enr_tf[i].get(t) and self.enr_ok(i, as_of):
+                    tf += ENR_W * self.enr_tf[i][t]
                 L = self.blen[i]
                 if u.id in self.store.edits:      # edited message: score the current text
                     txt, edited = self.store.current_text(u, as_of)
@@ -142,6 +180,8 @@ class Index:
                 if tf:
                     s = idf * (tf * (K1 + 1)) / (tf + K1 * (1 - B + B * L / avg))
                     matched[i].add(t)
+                elif not self.meta_tf[i].get(t):
+                    continue
                 if self.meta_tf[i].get(t):
                     s += meta_bonus * idf * (1.0 if tf else 0.5)
                     if not tf:
@@ -151,13 +191,17 @@ class Index:
 
 
 ANCHOR = re.compile(r"\b(?:the\s+(?:day|morning|afternoon|evening|night|week)\s+(?:i|we|of|before|after|that|when)|"
-                    r"when\s+i\s+(?:fly|leave|travel|land)|that\s+day|same\s+day)\b", re.I)
+                    r"(?:when|while|whenever)\s+i(?:'m|\s+am|\s+will\s+be)?\s+(?:in|at|on|flying|fly|leave|leaving|travel|traveling|travelling|land|landing)|"
+                    r"during\s+(?:my|the|our)|on\s+the\s+day\s+of|same\s+day\s+as|that\s+day|same\s+day)\b", re.I)
 
 
 class Retriever:
-    def __init__(self, store: Store, cfg=None):
+    def __init__(self, store: Store, cfg=None, enrich=None):
+        import os
         self.store = store
-        self.index = Index(store)
+        if enrich is None:
+            enrich = os.environ.get("CANDOR_ENRICH", "1") != "0"
+        self.index = Index(store, enrich=enrich)
         self.cfg = {"nbr": 0.25, "date": 1.5, "person": 1.25, "recency": 0.0, "prf": 0.5, "prf_docs": 6, "prf_terms": 10,
                     "thes": 0.5, "rec_decay_meeting": 0.6, "rec_decay_other": 0.85, "anchor": 3.0,
                     "source": 1.5, "datew": 0.6, "entity_latest": 0.0, "entity": 2.0, "recency": 0.6, "cov": 0.5, "why": 1.0}
@@ -230,7 +274,7 @@ class Retriever:
         return dict(best)
 
     # ---------------------------------------------------------------- search
-    def search(self, question, as_of, k=20, extra_terms=None):
+    def search(self, question, as_of, k=20, extra_terms=None, anchor_hint=None):
         st, ix = self.store, self.index
         vis = ix._visible_mask(as_of)
         q = self.analyse(question, as_of)
@@ -265,14 +309,14 @@ class Retriever:
         qdates = set(q["dates"])
         anchor_dates = set()
         am = ANCHOR.search(question)
-        if am:                       # two-hop: "the day I fly to Denver" -> find the flight, take its date
-            cl = tp.tokens(question[am.end():])
-            cl += thesaurus.expand(cl)
-            sc2, _ = self._pass(list(dict.fromkeys(cl)), {}, vis, as_of)
-            for i, _ in sorted(sc2.items(), key=lambda kv: -kv[1])[:2]:
-                u = st.units[i]
-                anchor_dates |= {d for d in tp.dates_in_text(st.current_text(u, as_of)[0], u.time, True) if d >= u.date}
-            anchor_dates -= qdates
+        if am:                       # two-hop: "the day I fly to Denver" -> look the anchor up, take its dates (and the span between)
+            clause = question[am.end():].strip(" ?.")
+            span = bool(re.match(r"(?:when|while|whenever)\s+i|during", am.group(0), re.I))
+            if clause:
+                anchor_dates |= self.resolve_anchors([{"query": clause, "span": span}], as_of)
+        anchor_dates -= qdates
+        if anchor_hint and not anchor_dates:     # the question's own words are more reliable than a model-named anchor
+            anchor_dates |= set(anchor_hint)
 
         # idf-weighted coverage of the question's own (non-expansion) terms
         own = [t for t in q["terms"] if t in ix.post]
@@ -315,6 +359,8 @@ class Retriever:
                     m *= 1 + (self.cfg["person"] - 1) * w
                     parts["person"] = 1
             udates = {u.date, *u.dates}
+            if ix.enr_dates[i] and ix.enr_ok(i, as_of):
+                udates |= set(ix.enr_dates[i])
             if qdates and udates & qdates:
                 m *= self.cfg["date"]
                 parts["date"] = 1
@@ -388,3 +434,80 @@ class Retriever:
             seen[self._key(h)] += 1
             chosen.append(h)
         return chosen
+
+
+    # ---------------------------------------------------------------- model-shaped search
+    def resolve_anchors(self, anchors, as_of, store_text=None):
+        """Look each anchor up ("flight to Denver"), collect the explicit dates of the best hits, and fill the span between them."""
+        out = set()
+        for a in anchors:
+            hits, _ = self.search(a["query"], as_of, k=3)
+            dates = set()
+            for h in hits[:2]:
+                dates |= {d for d in tp.dates_in_text(h.text, h.unit.time, True) if d >= h.unit.date}
+            if a.get("span") and len(dates) >= 2:   # "while I'm in Denver": a trip covers the days between its first and last date
+                lo, hi = min(dates), max(dates)
+                if (hi - lo).days <= 14:
+                    dates |= {lo + timedelta(days=i) for i in range((hi - lo).days + 1)}
+            out |= dates
+        return out
+
+    def search_plan(self, question, as_of, plan, k=30, extra_needs=None):
+        """Fuse the plain search with one search per planned phrasing, then reserve a top-10 seat for every evidence need.
+
+        The plain ranking keeps the largest weight, so a poor plan can reorder the tail but cannot lose what v1 found."""
+        duration_cue = bool(re.search(r"\b(while|during|throughout|whole|entire|trip|stay|week|days|there)\b", question, re.I))
+        anchors = self.resolve_anchors([{**a, "span": bool(a.get("span")) and duration_cue} for a in plan.get("anchors", [])], as_of) if plan else set()
+        base, q = self.search(question, as_of, k=60)          # the plain search: never touched by the plan
+        GENERIC = {"calendar", "schedule", "event", "meeting", "agenda", "today", "day", "date", "time", "thing", "stuff", "info", "update"}
+        needs = []
+        for n in list((plan or {}).get("needs", [])) + list(extra_needs or []):
+            qs = [qq for qq in n["queries"] if len([t for t in tp.tokens(qq) if t not in GENERIC]) >= 2]
+            if qs:
+                needs.append({**n, "queries": qs})
+        if not needs and not anchors:
+            return base[:k], q
+        RRF = 60
+        n_lists = sum(len(n["queries"]) for n in needs) + (1 if anchors else 0)
+        base_w = max(1.5, 0.5 * n_lists)         # the plain search always carries at least half of the fused mass
+        fused, hit_of = defaultdict(float), {}
+        for r, h in enumerate(base):
+            fused[h.unit.id] += base_w / (RRF + r + 1)
+            hit_of[h.unit.id] = h
+        if anchors:                  # model-named time anchors only add one more ranked list; they cannot rewrite the plain one
+            anch, _ = self.search(question, as_of, k=60, anchor_hint=anchors)
+            for r, h in enumerate(anch):
+                fused[h.unit.id] += 1.0 / (RRF + r + 1)
+                hit_of.setdefault(h.unit.id, h)
+        need_best = []
+        for n in needs:
+            nf = defaultdict(float)
+            for qq in n["queries"]:
+                hs, _ = self.search(qq, as_of, k=40, anchor_hint=anchors)
+                for r, h in enumerate(hs):
+                    nf[h.unit.id] += 1.0 / (RRF + r + 1)
+                    hit_of.setdefault(h.unit.id, h)
+            for uid, v in nf.items():
+                fused[uid] += v
+            ranked = sorted(nf, key=lambda i: -nf[i])
+            need_best.append(ranked[:2])
+        order = sorted(fused, key=lambda i: (-fused[i], hit_of[i].unit.time))
+        top = order[:10]
+        base_top = [h.unit.id for h in base[:3]]
+        # a plan may reorder the tail but never evict what the plain search ranked best: its top 3 always keep a seat
+        protected = set(base_top) | set(order[:2])
+        for b in base_top:
+            if b not in top:
+                victims = [i for i in reversed(top) if i not in protected]
+                if victims:
+                    top[top.index(victims[0])] = b
+        # seat reservation: every need's best record must sit inside the scored window
+        for best in need_best:
+            if best and not any(b in top for b in best):
+                want = best[0]
+                victims = [i for i in reversed(top) if i not in protected and not any(i in b[:1] for b in need_best)]
+                if victims:
+                    top[top.index(victims[0])] = want
+                    protected.add(want)
+        final = top + [i for i in order if i not in top]
+        return [hit_of[i] for i in final[:k]], q
